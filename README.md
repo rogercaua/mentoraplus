@@ -10,12 +10,11 @@ Mentora+ é uma plataforma web de curadoria de conteúdos educacionais, que perm
 - ✅ Criação automática de conteúdos aprovados
 - ✅ CRUD de conteúdos (Content)
 - 🔜 Fórum de discussão entre usuários
-- 🔜 Moderação visual via painel
 
 ## 📦 Tecnologias utilizadas
 
-- **Backend:** Django + Django Ninja (API REST)
-- **Banco de dados:** PostgreSQL
+- **Backend:** Django Ninja (API REST)
+- **Banco de dados:** SQLite
 - **Autenticação:** Token personalizado via header
 - **ORM:** Django ORM
 - **Deploy:** (em desenvolvimento)
@@ -92,7 +91,13 @@ pip install -r requirements.txt
 ```bash
 python manage.py migrate
 ```
+6.Rode o servidor:
 
+```bash
+python manage.py runserver
+```
+
+Utitize o endpoint api/docs para utilizar o SWAGGER
 
 
 

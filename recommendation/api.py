@@ -1,109 +1,105 @@
 from ninja import Router
-from typing import List
-from .models import Recommendation
-from .schemas import RecommendationIn, RecommendationOut, RecommendationUpdate
-from django.shortcuts import get_object_or_404
-from datetime import datetime
+from typing import List, Optional
 from user.auth import auth
+from mentoraplus.responses import MessageOut
+from .models import Recommendation, Content
+from .schemas import RecommendationIn, RecommendationOut
 from ninja.errors import HttpError
+from django.shortcuts import get_object_or_404
 
-router = Router()
+router = Router(tags=["Recommendation"])
 
-@router.post("/", response=RecommendationOut, auth=auth)
+# ADMIN - listar todas as recomendações
+@router.get("/recommendations", response=List[RecommendationOut], auth=auth)
+def list_all_recommendations(request):
+    if request.user.role != "admin":
+        raise HttpError(403, "Não autorizado")
+    
+    recs = Recommendation.objects.all()
+    return recs
+
+#----------------------------------------------------------------------------------------->
+
+# USUÁRIO - criar recomendação (tags capitalizadas)
+@router.post("/recommendations", response=RecommendationOut, auth=auth)
 def create_recommendation(request, data: RecommendationIn):
-    recommendation = Recommendation.objects.create(
+    data.tags = [tag.capitalize() for tag in data.tags] if hasattr(data, 'tags') else []
+    
+    rec = Recommendation.objects.create(
         title=data.title,
         description=data.description,
         type=data.type,
+        url=data.url,
+        tags=data.tags,
+        status="pending",
         suggested_by=request.user,
-        status="pending"
     )
-    recommendation = Recommendation.objects.select_related('suggested_by', 'reviewed_by').get(id=recommendation.id)
-    return RecommendationOut.from_orm(recommendation)
+    return rec
 
-@router.get("/", response=List[RecommendationOut], auth=auth)
-def list_recommendations(request):
+#----------------------------------------------------------------------------------------->
+
+# ADMIN - deletar recomendação pelo ID
+@router.delete("/recommendations/{rec_id}", response=MessageOut, auth=auth)
+def delete_recommendation(request, rec_id: int):
     if request.user.role != "admin":
-        return []
-    qs = Recommendation.objects.select_related('suggested_by', 'reviewed_by').all()
-    return [RecommendationOut.from_orm(rec) for rec in qs]
+        raise HttpError(403, "Não autorizado")
+    
+    rec = get_object_or_404(Recommendation, id=rec_id)
 
+    rec.delete()
+    return {"message": "Recomendação deletada com sucesso"}
 
+#----------------------------------------------------------------------------------------->
 
-@router.get("/pending", response=List[RecommendationOut], auth=auth)
+# ADMIN - listar recomendações pendentes
+@router.get("/recommendations/pending", response=List[RecommendationOut], auth=auth)
 def list_pending_recommendations(request):
     if request.user.role != "admin":
-        raise HttpError(403, "Not authorized")
-    qs = Recommendation.objects.select_related('suggested_by', 'reviewed_by').filter(status="pending")
-    return [RecommendationOut.from_orm(rec) for rec in qs]
+        raise HttpError(403, "Não autorizado")
+    
+    recs = Recommendation.objects.filter(status="pending")
+    return recs
 
+#----------------------------------------------------------------------------------------->
 
-
-@router.patch("/{rec_id}", response=RecommendationOut, auth=auth)
-def update_recommendation(request, rec_id: int, data: RecommendationUpdate):
+# ADMIN - aprovar recomendação: muda status para aprovado e adiciona em Content
+@router.post("/recommendations/{rec_id}/approve", response=MessageOut, auth=auth)
+def approve_recommendation(request, rec_id: int):
     if request.user.role != "admin":
-        raise HttpError(403, "Not authorized")
-    recommendation = get_object_or_404(Recommendation, id=rec_id)
-    recommendation.status = data.status
-    recommendation.reviewed_by = request.user
-    recommendation.updated_at = datetime.now()
-    recommendation.save()
+        raise HttpError(403, "Não autorizado")
+    
+    rec = get_object_or_404(Recommendation, id=rec_id)
+    
+    if rec.status != "pending":
+        raise HttpError(400, "Recomendação não está pendente")
+    
+    rec.status = "approved"
+    rec.reviewed_by = request.user
+    rec.save()
 
-    if data.status == "approved":
-        from content.models import Content
-        Content.objects.create(
-            title=recommendation.title,
-            description=recommendation.description,
-            type=recommendation.type,
-            created_by=request.user,
-        )
-    recommendation = Recommendation.objects.select_related('suggested_by', 'reviewed_by').get(id=rec_id)
-    return RecommendationOut.from_orm(recommendation)
+    Content.objects.create(
+        title=rec.title,
+        description=rec.description,
+        type=rec.type,
+        url=rec.url,
+        created_by=rec.suggested_by,
+        tags=rec.tags
+    )
+    return {"message": "Recomendação aprovada e conteúdo criado"}
 
+#----------------------------------------------------------------------------------------->
 
-
-@router.get("/{rec_id}", response=RecommendationOut, auth=auth)
-def get_recommendation(request, rec_id: int):
-    recommendation = get_object_or_404(Recommendation.objects.select_related('suggested_by', 'reviewed_by'), id=rec_id)
-    return RecommendationOut.from_orm(recommendation)
-
-
-
-@router.patch("/{rec_id}/reject", response=RecommendationOut, auth=auth)
+# ADMIN - rejeitar recomendação (com opção de deletar)
+@router.post("/recommendations/{rec_id}/reject", auth=auth)
 def reject_recommendation(request, rec_id: int):
     if request.user.role != "admin":
-        raise HttpError(403, "Not authorized")
+        raise HttpError(403, "Não autorizado")
+    rec = get_object_or_404(Recommendation, id=rec_id)
+    if rec.status != "pending":
+        raise HttpError(400, "Recomendação não está pendente")
 
-    recommendation = get_object_or_404(Recommendation, id=rec_id)
-    recommendation.status = "rejected"
-    recommendation.reviewed_by = request.user
-    recommendation.updated_at = datetime.now()
-    recommendation.save()
-
-    recommendation = Recommendation.objects.select_related('suggested_by', 'reviewed_by').get(id=rec_id)
-    return RecommendationOut.from_orm(recommendation)
-
-
-
-@router.delete("/delete_rejected", auth=auth)
-def delete_rejected_recommendations(request):
-    if request.user.role != "admin":
-        return {"error": "Not authorized"}
-
-    rejected_recommendations = list(Recommendation.objects.filter(status="rejected"))
-
-    deleted_data = [
-        {
-            "id": rec.id,
-            "title": rec.title,
-            "description": rec.description,
-            "type": rec.type,
-            "suggested_by": rec.suggested_by.id if rec.suggested_by else None,
-            "status": rec.status,
-        }
-        for rec in rejected_recommendations
-    ]
-
-    Recommendation.objects.filter(status="rejected").delete()
-
-    return {"deleted_recommendations": deleted_data}
+    rec.status = "rejected"
+    rec.reviewed_by = request.user
+    rec.save()
+    
+    return {"message": "Recomendação rejeitada"}

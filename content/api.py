@@ -1,92 +1,72 @@
 from ninja import Router
 from typing import List, Optional
-from .models import Content
-from .schemas import ContentIn, ContentOut, ContentUpdate
 from user.auth import auth
+from .models import Content
+from .schemas import ContentIn, ContentOut
+from mentoraplus.responses import MessageOut
+from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
-from datetime import datetime
 
-router = Router()
+router = Router(tags=["Content"])
 
-@router.post("/", response=ContentOut, auth=auth)
-def create_content(request, data: ContentIn):
-    """
-    Cria um novo conteúdo.
+# Listar todos os conteúdos (user e admin)
+@router.get("/contents", response=List[ContentOut], auth=auth)
+def list_contents(request, tag: Optional[str] = None, type: Optional[str] = None):
+    query = Content.objects.all()
+    
+    if tag:
+        query = query.filter(tags__icontains=tag.capitalize())
+    if type:
+        query = query.filter(type=type)
+        
+    return query
 
-    - Requer usuário autenticado.
-    - Campos obrigatórios: title, description, type.
-    - Tags são opcionais.
-    - O campo created_by é definido automaticamente pelo usuário autenticado.
+# Listar todas as tags (únicas) já existentes nos conteúdos
+@router.get("/contents/tags", auth=auth)
+def list_tags(request):
+    tags_set = set()
+    for content in Content.objects.all():
+        tags_set.update(content.tags)
+    return {"tags": sorted(tags_set)}
 
-    Retorna o conteúdo criado.
-    """
+# Deletar conteúdo (admin)
+@router.delete("/contents/{content_id}", auth=auth)
+def delete_content(request, content_id: int):
+    if request.user.role != "admin":
+        raise HttpError(403, "Não autorizado")
+    content = get_object_or_404(Content, id=content_id)
+    content.delete()
+    return {"message": "Conteúdo deletado com sucesso"}
+
+# Adicionar conteúdo (admin), capitalizando tags
+@router.post("/contents", response=ContentOut, auth=auth)
+def add_content(request, data: ContentIn):
+    if request.user.role != "admin":
+        raise HttpError(403, "Não autorizado")
+    
+    data.tags = [tag.upper() for tag in data.tags] if hasattr(data, 'tags') else []
+    
     content = Content.objects.create(
         title=data.title,
         description=data.description,
         type=data.type,
-        tags=data.tags or [],
+        url=data.url,
         created_by=request.user,
+        tags=data.tags
     )
     return content
 
-@router.get("/", response=List[ContentOut])
-def list_contents(request):
-    """
-    Lista todos os conteúdos disponíveis.
-    """
-    return Content.objects.all()
-
-@router.get("/search/", response=List[ContentOut])
-def search_contents(request, q: Optional[str] = None):
-    """
-    Busca conteúdos pelo título.
-
-    - Parâmetro `q`: termo para busca no título (case-insensitive).
-    - Se `q` não for informado ou vazio, retorna todos os conteúdos.
-    """
-    if not q:
-        return Content.objects.all()
-    return Content.objects.filter(title__icontains=q)
-
-@router.get("/{content_id}", response=ContentOut)
-def get_content(request, content_id: int):
-    """
-    Retorna os detalhes de um conteúdo específico pelo ID.
-    """
+# Atualizar conteúdo (admin)
+@router.put("/contents/{content_id}", response=ContentOut, auth=auth)
+def update_content(request, content_id: int, data: ContentIn):
+    if request.user.role != "admin":
+        raise HttpError(403, "Não autorizado")
     content = get_object_or_404(Content, id=content_id)
-    return content
-
-@router.put("/{content_id}", response=ContentOut, auth=auth)
-def update_content(request, content_id: int, data: ContentUpdate):
-    """
-    Atualiza um conteúdo existente.
-
-    - Apenas o criador do conteúdo ou um usuário admin podem atualizar.
-    - Campos atualizáveis são opcionais, apenas os enviados serão alterados.
-    - Atualiza automaticamente o campo updated_at.
-
-    Retorna o conteúdo atualizado.
-    """
-    content = get_object_or_404(Content, id=content_id)
-    if content.created_by != request.user and request.user.role != "admin":
-        return {"error": "Not authorized"}
-    for attr, value in data.dict(exclude_unset=True).items():
-        setattr(content, attr, value)
-    content.updated_at = datetime.now()
+    content.title = data.title
+    content.description = data.description
+    content.type = data.type
+    content.url = data.url
+    content.tags = [tag.upper() for tag in data.tags]
     content.save()
+    
     return content
-
-@router.delete("/{content_id}", auth=auth)
-def delete_content(request, content_id: int):
-    """
-    Deleta um conteúdo existente.
-
-    - Apenas o criador do conteúdo ou um usuário admin podem deletar.
-
-    Retorna sucesso se deletado.
-    """
-    content = get_object_or_404(Content, id=content_id)
-    if content.created_by != request.user and request.user.role != "admin":
-        return {"error": "Not authorized"}
-    content.delete()
-    return {"success": True}

@@ -1,21 +1,17 @@
-from pydantic import BaseModel
-from typing import Optional
+from ninja import Schema
 from datetime import datetime
 
-class DiscussionIn(BaseModel):
+class DiscussionIn(Schema):
     title: str
     content: str
     related_content_id: int
 
-class DiscussionOut(BaseModel):
+class DiscussionOut(Schema):
     id: int
     title: str
     content: str
     author_id: int
     related_content_id: int
+    is_closed: bool
     created_at: datetime
     updated_at: datetime
-    is_closed: bool
-    
-    class Config:
-        from_attributes = True

@@ -5,7 +5,7 @@ from comment.api import router as comment_router
 from recommendation.api import router as recommendation_router
 from discussion.api import router as discussion_router
 
-api = NinjaAPI(csrf=True , title="Mentora+ API", version="1.0")
+api = NinjaAPI(csrf=False , title="Mentora+ API", version="1.0")
 
 api.add_router("/user/", user_router)
 api.add_router("/content/", content_router)

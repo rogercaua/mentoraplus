@@ -1,88 +1,41 @@
 from ninja import Router
 from typing import List
-from .models import Comment
-from .schemas import CommentIn, CommentOut, CommentUpdate
-from user.auth import auth
+from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
-from datetime import datetime
+from mentoraplus.responses import MessageOut
+from .schemas import CommentOut, CommentIn
+from .models import Discussion, Comment
+from content.models import Content
+from user.auth import auth
 
-router = Router()
+router = Router(tags=["Comment"])
 
-@router.post("/", response=CommentOut, auth=auth)
-def create_comment(request, data: CommentIn):
-    """
-    Cria um novo comentário em uma discussão.
-
-    - **text**: texto do comentário.
-    - **discussion_id**: id da discussão relacionada.
-    - **author**: usuário autenticado que criou o comentário.
-
-    Retorna o comentário criado.
-    """
+# Criar comentário em uma discussão
+@router.post("/discussions/{discussion_id}/comments", response=CommentOut, auth=auth)
+def create_comment(request, discussion_id: int, data: CommentIn):
+    discussion = get_object_or_404(Discussion, id=discussion_id)
+    if discussion.is_closed:
+        raise HttpError(400, "Discussão está fechada para novos comentários")
     comment = Comment.objects.create(
         text=data.text,
-        discussion_id=data.discussion_id,
-        author=request.user
+        author=request.user,
+        discussion=discussion
     )
     return comment
 
-@router.get("/", response=List[CommentOut])
-def list_comments(request):
-    """
-    Lista todos os comentários existentes.
-    """
-    return Comment.objects.all()
 
-@router.get("/{comment_id}", response=CommentOut)
-def get_comment(request, comment_id: int):
-    """
-    Retorna um comentário específico pelo seu ID.
-    """
-    comment = get_object_or_404(Comment, id=comment_id)
-    return comment
+# Listar comentários de uma discussão
+@router.get("/discussions/{discussion_id}/comments", response=List[CommentOut])
+def list_comments(request, discussion_id: int):
+    discussion = get_object_or_404(Discussion, id=discussion_id)
+    return discussion.comments.all()
 
-@router.put("/{comment_id}", response=CommentOut, auth=auth)
-def update_comment(request, comment_id: int, data: CommentUpdate):
-    """
-    Atualiza um comentário existente.
 
-    Apenas o autor do comentário ou um admin pode atualizar.
-
-    - Atualiza os campos enviados no payload.
-
-    Retorna o comentário atualizado.
-    """
-    comment = get_object_or_404(Comment, id=comment_id)
-    if comment.author != request.user and request.user.role != "admin":
-        return {"error": "Not authorized"}
-    for attr, value in data.dict(exclude_unset=True).items():
-        setattr(comment, attr, value)
-    comment.save()
-    return comment
-
-@router.delete("/{comment_id}", auth=auth)
+# Deletar comentário (somente autor ou admin)
+@router.delete("/comments/{comment_id}", auth=auth)
 def delete_comment(request, comment_id: int):
-    """
-    Deleta um comentário.
-
-    Apenas o autor do comentário ou um admin pode deletar.
-
-    Retorna um JSON indicando sucesso.
-    """
     comment = get_object_or_404(Comment, id=comment_id)
-    if comment.author != request.user and request.user.role != "admin":
-        return {"error": "Not authorized"}
+    if request.user != comment.author and request.user.role != "admin":
+        raise HttpError(403, "Não autorizado")
     comment.delete()
-    return {"success": True}
-
-@router.get("/search/", response=List[CommentOut])
-def search_comments(request, q: str = None):
-    """
-    Busca comentários pelo texto.
-
-    - Parâmetro `q`: termo para busca dentro do texto do comentário.
-    - Retorna todos os comentários se `q` não informado ou vazio.
-    """
-    if not q:
-        return Comment.objects.all()
-    return Comment.objects.filter(text__icontains=q)
+    return {"message": "Comentário deletado com sucesso"}

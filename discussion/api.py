@@ -1,76 +1,61 @@
 from ninja import Router
 from typing import List
+from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
 from .models import Discussion
 from .schemas import DiscussionIn, DiscussionOut
-from user.auth import auth  # seu sistema de autenticação JWT
+from mentoraplus.responses import MessageOut
+from content.models import Content
+from user.auth import auth
 
-router = Router()
+router = Router(tags=["Discussion"])
 
-@router.post("/", response=DiscussionOut, auth=auth)
+# Criar uma discussão
+@router.post("/discussions", response=DiscussionOut, auth=auth)
 def create_discussion(request, data: DiscussionIn):
-    """
-    Cria uma nova discussão.
-
-    - Requer usuário autenticado.
-    - Campos obrigatórios: title, content, related_content_id.
-    - O autor será o usuário autenticado.
-
-    Retorna a discussão criada.
-    """
+    content = get_object_or_404(Content, id=data.related_content_id)
     discussion = Discussion.objects.create(
         title=data.title,
         content=data.content,
-        related_content_id=data.related_content_id,
+        related_content=content,
         author=request.user
     )
     return discussion
 
-@router.get("/{discussion_id}", response=DiscussionOut)
-def get_discussion(request, discussion_id: int):
-    """
-    Retorna os detalhes de uma discussão específica pelo ID.
-    """
-    discussion = get_object_or_404(Discussion, id=discussion_id)
-    return discussion
+#----------------------------------------------------------------------------------------->
 
-@router.get("/", response=List[DiscussionOut])
+# Listar todas as discussões
+@router.get("/discussions", response=List[DiscussionOut])
 def list_discussions(request):
-    """
-    Lista todas as discussões.
-    """
     return Discussion.objects.all()
 
-@router.put("/{discussion_id}", response=DiscussionOut, auth=auth)
-def update_discussion(request, discussion_id: int, data: DiscussionIn):
-    """
-    Atualiza uma discussão existente.
+#----------------------------------------------------------------------------------------->
 
-    - Apenas o autor pode atualizar.
-    - Campos atualizáveis: title, content, related_content_id.
+# Listar discussões de um conteúdo específico
+@router.get("/discussions/content/{content_id}", response=List[DiscussionOut])
+def list_discussions_by_content(request, content_id: int):
+    content = get_object_or_404(Content, id=content_id)
+    return content.discussions.all()
 
-    Retorna a discussão atualizada.
-    """
+#----------------------------------------------------------------------------------------->
+
+# Fechar uma discussão (somente o autor ou admin)
+@router.post("/discussions/{discussion_id}/close", response=MessageOut, auth=auth)
+def close_discussion(request, discussion_id: int):
     discussion = get_object_or_404(Discussion, id=discussion_id)
-    if discussion.author != request.user:
-        return {"detail": "Não autorizado."}
-    discussion.title = data.title
-    discussion.content = data.content
-    discussion.related_content_id = data.related_content_id
+    if request.user != discussion.author and request.user.role != "admin":
+        raise HttpError(403, "Não autorizado")
+
+    discussion.is_closed = True
     discussion.save()
-    return discussion
+    return {"message": "Discussão fechada com sucesso"}
 
-@router.delete("/{discussion_id}", auth=auth)
+
+# Deletar uma discussão (somente autor ou admin)
+@router.delete("/discussions/{discussion_id}", response=MessageOut, auth=auth)
 def delete_discussion(request, discussion_id: int):
-    """
-    Deleta uma discussão existente.
-
-    - Apenas o autor pode deletar.
-
-    Retorna sucesso se deletado.
-    """
     discussion = get_object_or_404(Discussion, id=discussion_id)
-    if discussion.author != request.user:
-        return {"detail": "Não autorizado."}
+    if request.user != discussion.author and request.user.role != "admin":
+        raise HttpError(403, "Não autorizado")
     discussion.delete()
-    return {"success": True}
+    return {"message": "Discussão deletada com sucesso"}

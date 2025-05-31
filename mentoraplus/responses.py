@@ -1,6 +1,6 @@
 from ninja import Schema
 
-class messageOut(Schema):
+class MessageOut(Schema):
     """
     Schema for the message response.
     """

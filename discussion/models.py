@@ -9,7 +9,4 @@ class Discussion(models.Model):
     related_content = models.ForeignKey(Content, on_delete=models.CASCADE, related_name="discussions")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    is_closed = models.BooleanField(default=False)  # Para fechar a discussão se necessário
-
-    def __str__(self):
-        return self.title
+    is_closed = models.BooleanField(default=False)

@@ -1,6 +1,6 @@
 from ninja import Router
 from .models import User
-from mentoraplus.responses import messageOut
+from mentoraplus.responses import MessageOut
 from .schemas import UserIn, UserOut,SelfOut, LoginIn, LoginOut
 from django.contrib.auth.hashers import make_password, check_password
 from django.shortcuts import get_object_or_404
@@ -12,7 +12,7 @@ from django.conf import settings
 from user.auth import auth
 from datetime import datetime, timedelta, timezone
 
-router = Router()
+router = Router(tags=["User"])
 
 def create_jwt(user_id: int) -> str:
     """
@@ -20,12 +20,14 @@ def create_jwt(user_id: int) -> str:
     """
     now = datetime.now(timezone.utc)
     payload = {
-        'user_id': user_id,
-        'exp': now + timedelta(hours=1),
-        'iat': now
+        'sub': str(user_id),                   
+        'iat': int(now.timestamp()),          
+        'exp': int((now + timedelta(hours=1)).timestamp()),  
     }
     token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
     return token
+
+#----------------------------------------------------------------------------------------->
 
 @router.post("/register", response=UserOut)
 def register(request, data: UserIn):
@@ -54,6 +56,8 @@ def register(request, data: UserIn):
     user.save()
     
     return user
+
+#----------------------------------------------------------------------------------------->
 
 @router.post('/login', response=LoginOut)
 def login(request, data: LoginIn):
@@ -110,7 +114,7 @@ def list_users(request):
 
 #----------------------------------------------------------------------------------------->
 
-@router.delete("/delete/{user_id}", response=messageOut, auth=auth)
+@router.delete("/delete/{user_id}", response=MessageOut, auth=auth)
 def delete_user(request,user_id: int):
     """
     Deleta um usuário, utilizando-se o ID.
@@ -128,5 +132,6 @@ def delete_user(request,user_id: int):
     if request.user.role == "user" and request.user.id != user.id:
         raise HttpError(403, "Não autorizado")
         
-    
+    User.delete(user)
+    return {"message": f"Usuário **{user.username}** deletado com sucesso."}
     

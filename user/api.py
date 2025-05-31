@@ -1,6 +1,7 @@
 from ninja import Router
 from .models import User
-from .schemas import UserIn, UserOut, UserLogin, TokenOut
+from mentoraplus.responses import messageOut
+from .schemas import UserIn, UserOut,SelfOut, LoginIn, LoginOut
 from django.contrib.auth.hashers import make_password, check_password
 from django.shortcuts import get_object_or_404
 from typing import List
@@ -8,9 +9,23 @@ from datetime import datetime, timedelta
 from jose import jwt
 from ninja.errors import HttpError
 from django.conf import settings
-from user.auth import auth  # Importa o auth modularizado
+from user.auth import auth
+from datetime import datetime, timedelta, timezone
 
 router = Router()
+
+def create_jwt(user_id: int) -> str:
+    """
+    Cria um token JWT para o usuário autenticado.
+    """
+    now = datetime.now(timezone.utc)
+    payload = {
+        'user_id': user_id,
+        'exp': now + timedelta(hours=1),
+        'iat': now
+    }
+    token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+    return token
 
 @router.post("/register", response=UserOut)
 def register(request, data: UserIn):
@@ -24,38 +39,60 @@ def register(request, data: UserIn):
 
     Retorna os dados do usuário criado, sem a senha.
     """
-    data.password = make_password(data.password)
-    user = User.objects.create(**data.model_dump())
-    return UserOut.model_validate(user)
+    
+    if User.objects.filter(username=data.username).exists():
+        raise HttpError(400, 'Nome de Usuario já existe.')
+    if User.objects.filter(email=data.email).exists():
+        raise HttpError(400,'Email já existente.')
+    
+    user = User(
+        username = data.username,
+        email = data.email,
+        password = make_password(data.password),
+        role = data.role if data.role else 'user'
+    )
+    user.save()
+    
+    return user
 
-@router.post("/login", response=TokenOut)
-def login(request, data: UserLogin):
+@router.post('/login', response=LoginOut)
+def login(request, data: LoginIn):
     """
-    Realiza login e retorna token JWT.
-
-    - **email**: e-mail cadastrado
-    - **password**: senha do usuário
-
-    Retorna um token de acesso e o tipo do token (Bearer).
+    Login de usuário.
+    
+    -**email**: e-mail do usuário
+    -**password**: senha
+    
+    Retorna authToken
     """
-    user = get_object_or_404(User, email=data.email)
+    try:
+        user = User.objects.get(email=data.email) 
+    except User.DoesNotExist:
+        raise HttpError(401, 'Email ou senha inválidos.')
+    
     if not check_password(data.password, user.password):
-        raise HttpError(401, "Credenciais inválidas")
-    token_payload = {
-        "sub": str(user.id),
-        "exp": datetime.utcnow() + timedelta(minutes=60),
-    }
-    token = jwt.encode(token_payload, settings.SECRET_KEY, algorithm="HS256")
-    return {"access_token": token, "token_type": "Bearer"}
+        raise HttpError(401, 'Email ou senha inválidos.')
+    
+    token = create_jwt(user.id)
+    
+    return {'access_token': token, 'token_type': 'bearer'}
 
-@router.get("/me", response=UserOut, auth=auth)
+#----------------------------------------------------------------------------------------->
+
+@router.get("/me", response=SelfOut, auth=auth)
 def me(request):
     """
     Retorna os dados do usuário autenticado.
 
     Requer token JWT válido.
     """
-    return UserOut.model_validate(request.user)
+    user = request.user
+    if not user:
+        raise HttpError(401, "Usuário não autenticado")
+    
+    return user
+
+#----------------------------------------------------------------------------------------->
 
 @router.get("/all", response=List[UserOut], auth=auth)
 def list_users(request):
@@ -68,5 +105,28 @@ def list_users(request):
         raise HttpError(403, "Não autorizado")
     
     users = User.objects.all()
-    # Converte a queryset para lista de schemas usando list comprehension
-    return [UserOut.model_validate(user) for user in users]
+
+    return users
+
+#----------------------------------------------------------------------------------------->
+
+@router.delete("/delete/{user_id}", response=messageOut, auth=auth)
+def delete_user(request,user_id: int):
+    """
+    Deleta um usuário, utilizando-se o ID.
+
+    - **user_id**: ID do usuário a ser deletado
+    - **auth**: token JWT do usuário autenticado
+    
+    -Usuário com role 'user' pode deletar sua própria conta.
+    -Usuário com role 'admin' pode deletar qualquer conta.
+    
+    Requer autenticação do usuário.
+    """
+    user = get_object_or_404(User, id=user_id)
+    
+    if request.user.role == "user" and request.user.id != user.id:
+        raise HttpError(403, "Não autorizado")
+        
+    
+    

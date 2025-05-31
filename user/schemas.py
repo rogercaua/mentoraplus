@@ -1,25 +1,28 @@
-from pydantic import BaseModel, EmailStr, constr
+from ninja import Schema
+from pydantic import EmailStr
 from typing import Optional
 
-class UserIn(BaseModel):
-    username: constr(min_length=3, max_length=150)
+class UserIn(Schema):
+    username: str
     email: EmailStr
-    password: constr(min_length=6)
+    password: str
     role: Optional[str] = "user"  # padrão para usuário comum
 
-class UserOut(BaseModel):
+class UserOut(Schema):
     id: int
     username: str
     email: EmailStr
     role: str
 
-    class Config:
-        from_attributes = True  # Para aceitar objetos ORM do Django
+class SelfOut(Schema):
+    id: int
+    username: str
+    email: EmailStr
 
-class UserLogin(BaseModel):
+class LoginIn(Schema):
     email: EmailStr
     password: str
 
-class TokenOut(BaseModel):
+class LoginOut(Schema):
     access_token: str
     token_type: str
